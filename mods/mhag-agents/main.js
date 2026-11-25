@@ -424,6 +424,13 @@ export default class Agents extends View {
       ? list.flatMap(withKids)
       : groups.flatMap((g) => [header(g), ...(this.folded.has(g.id) ? [] : g.members.flatMap(withKids))]);
 
+    // Open, the block is exactly as tall as its rows (header 41, group header and agent 30, sub-agent 26, 8 below): no scrolling.
+    if (!collapsed && shared("agents.open") !== false) {
+      const agentsShown = groups.reduce((n, g) => n + (this.folded.has(g.id) ? 0 : g.members.length), 0);
+      const need = list.length ? 41 + groups.length * 30 + agentsShown * 30 + (rows.length - groups.length - agentsShown) * 26 + 8 : 120;
+      if (find(layout(), "agents")?.size?.px !== need) run("layout.resize", { id: "agents", px: need });
+    }
+
     const listOn = collapsed || shared("agents.open") !== false;
     return v_flex()
       .size_full()
@@ -458,7 +465,7 @@ export default class Agents extends View {
       .when(list.length === 0 && !collapsed && listOn, (el) =>
         el.child(div().px(12).text_size(12).text_color(t.dim).child("No agent status yet. Agents show up here when they report their status. Older versions and agents inside tmux may not.")),
       )
-      .when(listOn, (el) => el.child(v_flex().id("ag-list").flex_1().min_h(0).px(collapsed ? 0 : 8).overflow_y_scrollbar().mode("always").children(rows)))
+      .when(listOn, (el) => el.child(v_flex().id("ag-list").flex_1().min_h(0).px(collapsed ? 0 : 8).overflow_y_scrollbar().children(rows)))
       .when(collapsed, (el) =>
         el.child(
           h_flex()
