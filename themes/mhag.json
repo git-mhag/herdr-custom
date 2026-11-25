@@ -30,6 +30,9 @@
     "hover": "#222220",
     "selected": "#2B2B28",
     "border": "#3D4039",
-    "foreground": "#c9c9c4"
+    "foreground": "#c9c9c4",
+    "working": "#d19a66",
+    "blocked": "#e06c75",
+    "done": "#98c379"
   }
 }

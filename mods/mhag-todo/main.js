@@ -1,8 +1,9 @@
 // A simple todo list in the side panel. Done items move to a collapsed "Done" section.
-// Items live in shared state ("todo.items"), so they survive restarts and are the same in every space.
+// The send arrows paste a task (or all open ones) into the last focused terminal and press Enter;
+// `todo` in a terminal prints that space's list (bin/todo.js reads shared.json).
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { theme, shared, setShared, spaces } from "herdr";
+import { theme, shared, setShared, spaces, focused, hc, notify } from "herdr";
 
 // Todos are kept per space (a branch's worktree is its own space): shared "todo.bySpace" = { spaceId: [items] }.
 const all = () => { const v = shared("todo.bySpace"); return v && typeof v === "object" && !Array.isArray(v) ? v : {}; };
@@ -31,6 +32,20 @@ export default class Todo extends View {
     cx.notify();
   }
 
+  // Clicking this panel may take focus from the terminal, so remember the last focused one.
+  send(text) {
+    const term = this.lastTerm;
+    if (!term) return notify({ title: "Todo", body: "Click a terminal first, then send.", level: "warning" });
+    hc(["send", term, text]).then(r => { if (r.code) notify({ title: "Todo: send failed", body: r.stderr || r.stdout, level: "error" }); },
+      e => notify({ title: "Todo: send failed", body: String(e), level: "error" }));
+  }
+
+  sendButton(id, onClick, t) {
+    return div().id(id).size(20).flex_none().flex().items_center().justify_center().rounded(5).text_color(t.dim).cursor_pointer()
+      .hover(s => s.bg(t.raised).text_color(t.foreground)).on_click(onClick)
+      .child(svg("mods/mhag-todo/send.svg").size(12));
+  }
+
   update(id, fn) { save(items().flatMap(i => i.id === id ? fn(i) : [i])); }
 
   row(i, t) {
@@ -40,6 +55,7 @@ export default class Todo extends View {
     return h_flex().id(`todo-${i.id}`).min_h(30).flex_none().px(8).py(5).gap(9).items_center().rounded(7).hover(s => s.bg(t.hover))
       .child(box)
       .child(div().flex_1().min_w(0).text_size(13).text_color(i.done ? t.dim : t.muted).when(i.done, el => el.line_through()).child(i.text))
+      .when(!i.done, el => el.child(this.sendButton(`todo-send-${i.id}`, () => this.send(i.text), t)))
       .child(div().id(`todo-del-${i.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(5).text_color(t.dim).cursor_pointer()
         .hover(s => s.bg(t.raised).text_color(t.foreground)).on_click(() => this.update(i.id, () => []))
         .child(svg("mods/mhag-todo/x.svg").size(12)));
@@ -47,12 +63,15 @@ export default class Todo extends View {
 
   render() {
     const t = theme();
+    const f = focused();
+    if (f?.terminal) this.lastTerm = f.terminal;
     const list = items();
     const open = list.filter(i => !i.done), done = list.filter(i => i.done);
     return v_flex().id("todo").size_full().min_h(0).overflow_hidden().bg(t.chrome).text_color(t.foreground).text_size(13)
       .child(h_flex().h(30).flex_none().px(10).gap(8).items_center().text_size(12).text_color(t.dim)
         .child(div().font_medium().child("Todo"))
-        .child(div().flex_1().text_color(t.dim).text_right().child(open.length ? `${open.length} open` : "")))
+        .child(div().flex_1().text_color(t.dim).text_right().child(open.length ? `${open.length} open` : ""))
+        .when(open.length > 0, el => el.child(this.sendButton("todo-send-all", () => this.send(`Todo:\n${open.map(i => `- ${i.text}`).join("\n")}`), t))))
       .child(h_flex().flex_none().m(8).h(32).gap(6).items_center()
         .child(div().id("todo-input").flex_1().min_w(0).h_full().px(10).flex().items_center().rounded(8).bg(t.background).cursor_text()
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).relative().child(Input.new(this.input).h_full().text_size(12).text_color(t.muted))

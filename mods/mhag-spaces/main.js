@@ -3,9 +3,9 @@
 // its first terminal is in now, only where unusual: branch, ahead/behind. Agent state lives in the agents list, not here. Click to
 // switch, right-click for its menu, drag to reorder.
 
-import { View, div, svg } from "gpui-kit";
+import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle } from "gpui-base";
-import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
+import { spaces, machines, panes, agents, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
 
 // Open todos of a space (the todo mod keeps them per space).
 const openTodos = (id) => ((shared("todo.bySpace") ?? {})[id] ?? []).filter((i) => !i.done).length;
@@ -57,6 +57,24 @@ async function both(a, b) {
 const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
 
 // A space speaks up only when something in it needs you.
+
+// Per space: what runs in its shown tab (an agent first) and its agent dot. Working shows always;
+// needs-input and finished-unseen only while that agent's terminal isn't the focused one.
+function liveInfo(sp) {
+  const ps = panes(), ags = agents(), out = {};
+  for (const s of sp) {
+    const tab = s.tabs.find((x) => x.active);
+    const mine = ps.filter((p) => p.terminal && p.tab === tab?.id);
+    const p = mine.find((x) => x.program?.agent) ?? mine.find((x) => x.focused) ?? mine[0];
+    const a = ags.filter((x) => x.space === s.id);
+    const dot = a.some((x) => x.status === "blocked" && !x.focused) ? "blocked"
+      : a.some((x) => x.status === "done" && !x.focused) ? "done"
+      : a.some((x) => x.status === "working") ? "working" : null;
+    out[s.id] = { prog: p?.program?.icon ? p.program : null, dot };
+  }
+  return out;
+}
+
 export function glyph(status) {
   return status === "blocked" || status === "done" ? "●" : "·";
 }
@@ -506,7 +524,14 @@ export default class Spaces extends View {
         h_flex()
           .gap(9)
           .items_center()
+          .relative()
+          .when(Boolean(tree) && Boolean(this.live?.[w.id]?.dot), el => el.child(div().absolute().left(6).top(0).bottom(0).flex().items_center()
+            .child(div().size(6).rounded_full().bg(t[this.live[w.id].dot])
+              .when(this.live[w.id].dot === "working", d => d.loop("opacity", { from: 0.25, to: 1, period: 1200 })))))
           .when(Boolean(tree), el => el.pl(22).child(svg("mods/workspace-chrome/branch.svg").size(13).flex_none().text_color(t.dim)))
+          .when(Boolean(tree) && Boolean(this.live?.[w.id]?.prog), el => el.child(this.live[w.id].prog.tint
+            ? svg(this.live[w.id].prog.icon).size(13).flex_none().text_color(t.dim)
+            : image(this.live[w.id].prog.icon).size(13).flex_none()))
           .child(div().flex_initial().min_w(SIDE_MIN).truncate().text_color((part === "folder" ? live : w.active) ? t.foreground : t.dim).child(part === "branch" ? g.branch : w.name))
           .child(g ? this.gitTail(g, tree, part === "branch" ? g.branch : w.name, t) : div().flex_1())
           .when(part === "folder" && total > 0, el => el.child(div().flex_none().text_size(11.5).text_color(t.dim).child(String(total))))
@@ -546,6 +571,7 @@ export default class Spaces extends View {
       changed = true;
     }
     if (changed) setShared("space.colors", kept);
+    this.live = liveInfo(sp);
     const list = this.grouped(t, collapsed);
     // Bring the active space into view when it, or its place in the list, changes; a row already in view stays put.
     const active = sp.find(p => p.active)?.id;
