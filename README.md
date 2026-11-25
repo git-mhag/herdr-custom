@@ -6,12 +6,26 @@ Fonts, functions and shortcuts are Herdr's own.
 
 ![mhag](preview.png)
 
-## Install
+## Install with Claude
+
+Copy this prompt into Claude Code running in a Herdr terminal (the copy button is at the top right of the box):
+
+```text
+Install the mhag layout for Herdr from https://github.com/git-mhag/herdr-custom.
+Clone the repo into a temporary folder and read README.md and both installers before running anything.
+Then run install.ps1 on Windows (powershell -ExecutionPolicy Bypass -File install.ps1)
+or ./install.sh on macOS and Linux. It copies the mhag layout, theme and mods into my Herdr folder,
+the `todo` command into ~/.local/bin and the /todo command into ~/.claude/commands.
+Tell me what it installed, whether every mod check passed, and anything I still need to do
+(Node.js, ~/.local/bin on PATH). Do not change my other layouts, mods or settings.
+```
+
+## Install by hand
 
 Needs Herdr (started at least once). Node.js is optional; it powers the `todo` command and the Claude `/todo` commands.
 
 ```sh
-git clone https://github.com/mhag-int/herdr-custom
+git clone https://github.com/git-mhag/herdr-custom
 cd herdr-custom
 ./install.sh                                              # macOS / Linux
 powershell -ExecutionPolicy Bypass -File install.ps1      # Windows
