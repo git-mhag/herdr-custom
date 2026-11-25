@@ -357,18 +357,22 @@ export default class Spaces extends View {
     return out.filter(r => this.shown.has(r.w.id));
   }
 
+  isShut(repo) { return this.shut.has(repo) && !this.busyRepos?.has(repo); }
+
   // The rows, under a header per machine once one isn't this computer.
   grouped(t, collapsed) {
     // Worktrees of a folded folder are hidden with its branch row.
     const every = this.ordered();
-    const rows = every.filter((r) => collapsed || !(r.tree && this.shut.has(r.g?.repo)));
+    // Folders with an agent working, waiting or finished-unseen stay open.
+    this.busyRepos = new Set(every.filter((k) => k.g && this.live?.[k.w.id]?.dot).map((k) => k.g.repo));
+    const rows = every.filter((r) => collapsed || !(r.tree && this.isShut(r.g?.repo)));
     // A main checkout is a folder: its name, then its own branch row, then its worktrees.
     const folder = (r) => !collapsed && r.tree === null && r.g && !r.g.linked;
     const draw = (r) => (collapsed ? [this.compact(r, t)] : folder(r)
-      ? [this.row({ ...r, g: null, part: "folder", repo: r.g.repo, total: every.filter((k) => k.g?.repo === r.g.repo).reduce((n, k) => n + openTodos(k.w.id), 0), live: every.some((k) => k.g?.repo === r.g.repo && k.w.active) }, t), ...(this.shut.has(r.g.repo) ? [] : [this.row({ ...r, tree: "└─", part: "branch" }, t)])]
+      ? [this.row({ ...r, g: null, part: "folder", repo: r.g.repo, total: every.filter((k) => k.g?.repo === r.g.repo).reduce((n, k) => n + openTodos(k.w.id), 0), live: every.some((k) => k.g?.repo === r.g.repo && k.w.active) }, t), ...(this.isShut(r.g.repo) ? [] : [this.row({ ...r, tree: "└─", part: "branch" }, t)])]
       : [this.row(r, t)]);
     // Where the active space's row lands among the flattened children.
-    const slot = (list) => { let n = 0; for (const r of list) { n += folder(r) && !this.shut.has(r.g.repo) ? 2 : 1; if (r.w.active) return n - 1; } return -1; };
+    const slot = (list) => { let n = 0; for (const r of list) { n += folder(r) && !this.isShut(r.g.repo) ? 2 : 1; if (r.w.active) return n - 1; } return -1; };
     // Where the active space's row lands among the children this returns: the list scrolls by its direct
     // children, and machine headers, login notes and loading rows count too.
     this.activeAt = -1;
@@ -514,7 +518,9 @@ export default class Spaces extends View {
           const index = spaces().findIndex(s => s.id === w.id);
           if (index !== -1) run("space.move", { id: from, index: index + 1 });
         } else if (from === w.id && part === "folder") {
-          this.shut.has(repo) ? this.shut.delete(repo) : this.shut.add(repo);
+          // Opening a folded folder also selects its first branch; a folder with agent activity can't fold.
+          if (this.isShut(repo)) { this.shut.delete(repo); run("space.select", { id: w.id }); }
+          else if (!this.busyRepos.has(repo)) this.shut.add(repo);
           localStorage.setItem("folders.folded", JSON.stringify([...this.shut]));
         } else if (from === w.id) run("space.select", { id: w.id });
         cx.notify();
@@ -536,7 +542,7 @@ export default class Spaces extends View {
           .child(g ? this.gitTail(g, tree, part === "branch" ? g.branch : w.name, t) : div().flex_1())
           .when(part === "folder" && total > 0, el => el.child(div().flex_none().text_size(11.5).text_color(t.dim).child(String(total))))
           .when(part !== "folder" && openTodos(w.id) > 0, el => el.child(div().flex_none().w(11).flex().justify_end().text_size(11.5).text_color(t.dim).child(String(openTodos(w.id)))))
-          .when(part === "folder", el => el.child(svg(`mods/workspace-chrome/chevron-${this.shut.has(repo) ? "right" : "down"}.svg`).size(11).flex_none().text_color(t.dim))),
+          .when(part === "folder", el => el.child(svg(`mods/workspace-chrome/chevron-${this.isShut(repo) ? "right" : "down"}.svg`).size(11).flex_none().text_color(t.dim))),
       );
   }
 

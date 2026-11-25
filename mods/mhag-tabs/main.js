@@ -1,6 +1,6 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, ScrollHandle } from "gpui-base";
-import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings } from "herdr";
+import { spaces, panes, run, openOverlay, theme, window, shared, setShared, layout, settings } from "herdr";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -31,8 +31,6 @@ export default class Tabs extends View {
   init() {
     this.pressed = null;
     this.scroll = ScrollHandle.new();
-    try { this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}"); } catch { this.panels = {}; }
-    if (!this.panels || typeof this.panels !== "object" || Array.isArray(this.panels)) this.panels = {};
     this.swipe = { acc: 0, steps: 0, at: 0, last: 0 };
   }
 
@@ -59,32 +57,28 @@ export default class Tabs extends View {
     run(e.delta.y > 0 ? "tab.prev" : "tab.next");
   }
 
-  // The side panel is remembered per space: switching shows that space's choice
-  // (closed if it never had one), and opening or closing it records it.
-  syncPanel(space, panel, body, enabled) {
-    if (!space || !panel) return;
+  // The side panel (Files, Changes, Todo or closed) is one choice for every space and window:
+  // shared "panel.open" holds it; a change here is stored, a stored change is applied here.
+  syncPanel(panel, body, enabled) {
+    if (!panel) return;
     const now = panel.hidden ? null : body?.active ?? null;
-    if (space.id !== this.space) {
-      const first = this.space === undefined;
-      this.space = space.id; this.pending = null;
-      if (!(first && !(space.id in this.panels))) {
-        const stored = this.panels[space.id] ?? null, want = enabled.includes(stored) ? stored : null;
-        if (want !== now) {
-          this.pending = { want, until: Date.now() + 1000 };
-          if (want) { run("layout.select", { stack: "panel-body", child: want }); run("layout.show", { id: "panel" }); }
-          else run("layout.hide", { id: "panel" });
-          return;
-        }
+    let want = shared("panel.open");
+    if (want === undefined) { setShared("panel.open", now); this.seen = now; return; }
+    if (want !== null && !enabled.includes(want)) want = null;
+    if (want !== this.seen) {
+      this.seen = want;
+      if (want !== now) {
+        this.pending = Date.now() + 1000;
+        if (want) { run("layout.select", { stack: "panel-body", child: want }); run("layout.show", { id: "panel" }); }
+        else run("layout.hide", { id: "panel" });
       }
+      return;
     }
-    // Until the restore lands (or something else won), the old state isn't a choice.
-    if (this.pending) {
-      if (this.pending.want !== now && Date.now() < this.pending.until) return;
-      this.pending = null;
-    }
-    if (this.panels[space.id] === now) return;
-    this.panels[space.id] = now;
-    localStorage.setItem("panels", JSON.stringify(this.panels));
+    // Until the applied state lands, the old one isn't a choice.
+    if (now === want) { this.pending = 0; return; }
+    if (Date.now() < (this.pending ?? 0)) return;
+    setShared("panel.open", now);
+    this.seen = now;
   }
 
   render() {
@@ -130,7 +124,7 @@ export default class Tabs extends View {
       : 10;
     const panel = find(root, "panel"), body = find(root, "panel-body");
     const enabled = [...new Set([...(shared("workspace.panels") ?? ["files", "changes"]), "todo"])];
-    this.syncPanel(space, panel, body, enabled);
+    this.syncPanel(panel, body, enabled);
     const panelButton = (id, label, icon) => {
       const on = panel && !panel.hidden && body?.active === id;
       return h_flex().id(`panel-${id}`).h(18).px(8).gap(5).flex_none().items_center().rounded(6)

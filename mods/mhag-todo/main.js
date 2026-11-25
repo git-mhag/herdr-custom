@@ -1,18 +1,27 @@
 // A simple todo list in the side panel. Done items move to a collapsed "Done" section.
-// The send arrows paste a task (or all open ones) into the last focused terminal and press Enter;
+// The send arrows paste "- task" lines into the last focused terminal without Enter, so several can be collected;
 // `todo` in a terminal prints that space's list (bin/todo.js reads shared.json).
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { theme, shared, setShared, spaces, focused, hc, notify } from "herdr";
+import { theme, shared, setShared, spaces, focused, run, notify, exec, home, checking } from "herdr";
 
 // Todos are kept per space (a branch's worktree is its own space): shared "todo.bySpace" = { spaceId: [items] }.
 const all = () => { const v = shared("todo.bySpace"); return v && typeof v === "object" && !Array.isArray(v) ? v : {}; };
 const current = () => spaces().find(s => s.active)?.id;
 const items = () => { const l = all()[current()]; return Array.isArray(l) ? l : []; };
-const save = (list) => { const id = current(); if (id) setShared("todo.bySpace", { ...all(), [id]: list }); };
+// Mirrors every space's open tasks as Claude commands (/todo-<task>) through bin/todo.js.
+const sync = (by) => {
+  if (checking()) return;
+  const names = Object.fromEntries(spaces().map(s => [s.id, s.name]));
+  const open = Object.entries(by).filter(([id]) => names[id]).flatMap(([id, l]) => (Array.isArray(l) ? l : []).filter(i => !i.done).map(i => ({ space: names[id], text: i.text })));
+  exec("node", [`${home()}/.local/bin/todo.js`, "--sync", JSON.stringify(open)])
+    .then(r => { if (r.code) notify({ title: "Todo: Claude commands not updated", body: r.stderr, level: "error" }); }, e => notify({ title: "Todo: Claude commands not updated", body: String(e), level: "error" }));
+};
+const save = (list) => { const id = current(); if (!id) return; const by = { ...all(), [id]: list }; setShared("todo.bySpace", by); sync(by); };
 
 export default class Todo extends View {
   init() {
+    sync(all());
     this.doneOpen = false;
     this.typing = false;
     this.input = InputState.new({});
@@ -33,11 +42,14 @@ export default class Todo extends View {
   }
 
   // Clicking this panel may take focus from the terminal, so remember the last focused one.
-  send(text) {
+  // hc send always presses Enter, so paste through the clipboard instead; each line ends in a newline
+  // so the next send starts on its own line.
+  send(texts, cx) {
     const term = this.lastTerm;
     if (!term) return notify({ title: "Todo", body: "Click a terminal first, then send.", level: "warning" });
-    hc(["send", term, text]).then(r => { if (r.code) notify({ title: "Todo: send failed", body: r.stderr || r.stdout, level: "error" }); },
-      e => notify({ title: "Todo: send failed", body: String(e), level: "error" }));
+    cx.write_to_clipboard(texts.map(x => `- ${x}\n`).join(""));
+    run("pane.focus", { terminal: term });
+    run("terminal.paste");
   }
 
   sendButton(id, onClick, t) {
@@ -55,7 +67,7 @@ export default class Todo extends View {
     return h_flex().id(`todo-${i.id}`).min_h(30).flex_none().px(8).py(5).gap(9).items_center().rounded(7).hover(s => s.bg(t.hover))
       .child(box)
       .child(div().flex_1().min_w(0).text_size(13).text_color(i.done ? t.dim : t.muted).when(i.done, el => el.line_through()).child(i.text))
-      .when(!i.done, el => el.child(this.sendButton(`todo-send-${i.id}`, () => this.send(i.text), t)))
+      .when(!i.done, el => el.child(this.sendButton(`todo-send-${i.id}`, (_e, cx) => this.send([i.text], cx), t)))
       .child(div().id(`todo-del-${i.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(5).text_color(t.dim).cursor_pointer()
         .hover(s => s.bg(t.raised).text_color(t.foreground)).on_click(() => this.update(i.id, () => []))
         .child(svg("mods/mhag-todo/x.svg").size(12)));
@@ -71,7 +83,7 @@ export default class Todo extends View {
       .child(h_flex().h(30).flex_none().px(10).gap(8).items_center().text_size(12).text_color(t.dim)
         .child(div().font_medium().child("Todo"))
         .child(div().flex_1().text_color(t.dim).text_right().child(open.length ? `${open.length} open` : ""))
-        .when(open.length > 0, el => el.child(this.sendButton("todo-send-all", () => this.send(`Todo:\n${open.map(i => `- ${i.text}`).join("\n")}`), t))))
+        .when(open.length > 0, el => el.child(this.sendButton("todo-send-all", (_e, cx) => this.send(open.map(i => i.text), cx), t))))
       .child(h_flex().flex_none().m(8).h(32).gap(6).items_center()
         .child(div().id("todo-input").flex_1().min_w(0).h_full().px(10).flex().items_center().rounded(8).bg(t.background).cursor_text()
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).relative().child(Input.new(this.input).h_full().text_size(12).text_color(t.muted))
