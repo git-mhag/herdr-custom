@@ -30,6 +30,11 @@ export default class Todo extends View {
     this.input.on("submit", (_e, cx) => this.add(cx));
     this.input.on("focus", (_e, cx) => { this.typing = true; cx.notify(); });
     this.input.on("blur", (_e, cx) => { this.typing = false; cx.notify(); });
+    // Clicking a task's text edits it in place; Enter or clicking away saves (an emptied text keeps the old one).
+    this.editing = null;
+    this.edit = InputState.new({});
+    this.edit.on("submit", (_e, cx) => this.commit(cx));
+    this.edit.on("blur", (_e, cx) => this.commit(cx));
   }
 
   add(cx) {
@@ -58,6 +63,22 @@ export default class Todo extends View {
       .child(svg("mods/mhag-todo/send.svg").size(12));
   }
 
+  startEdit(i, cx) {
+    this.editing = i.id;
+    this.edit.set_value(i.text);
+    this.edit.focus();
+    cx.notify();
+  }
+
+  commit(cx) {
+    const id = this.editing;
+    if (!id) return;
+    this.editing = null;
+    const text = this.edit.value().trim();
+    if (text) this.update(id, x => [{ ...x, text }]);
+    cx.notify();
+  }
+
   update(id, fn) { save(items().flatMap(i => i.id === id ? fn(i) : [i])); }
 
   row(i, t) {
@@ -66,7 +87,10 @@ export default class Todo extends View {
       .when(i.done, el => el.bg(t.border).child(svg("mods/mhag-todo/check.svg").size(11).text_color(t.background)));
     return h_flex().id(`todo-${i.id}`).min_h(30).flex_none().px(8).py(5).gap(9).items_center().rounded(7).hover(s => s.bg(t.hover))
       .child(box)
-      .child(div().flex_1().min_w(0).text_size(13).text_color(i.done ? t.dim : t.muted).when(i.done, el => el.line_through()).child(i.text))
+      .child(this.editing === i.id
+        ? div().flex_1().min_w(0).h(20).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).child(Input.new(this.edit).h_full().text_size(13).text_color(t.foreground))
+        : div().id(`todo-text-${i.id}`).flex_1().min_w(0).text_size(13).text_color(i.done ? t.dim : t.muted).cursor_text().when(i.done, el => el.line_through())
+          .on_click((_e, cx) => this.startEdit(i, cx)).child(i.text))
       .when(!i.done, el => el.child(this.sendButton(`todo-send-${i.id}`, (_e, cx) => this.send([i.text], cx), t)))
       .child(div().id(`todo-del-${i.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(5).text_color(t.dim).cursor_pointer()
         .hover(s => s.bg(t.raised).text_color(t.foreground)).on_click(() => this.update(i.id, () => []))
